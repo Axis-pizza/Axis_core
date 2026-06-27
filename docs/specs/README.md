@@ -2,9 +2,12 @@
 
 Technical specs for Axis Core.
 
-Examples:
+Proposals:
+
+- [Axis Core ApprovedRoute Validation Proposal](axis-core-approved-route-validation-proposal.md)
+
+Planned or maintained on their respective review branches:
 
 - account model
 - instruction surface
-- ApprovedRoute model
 - fee accounting model

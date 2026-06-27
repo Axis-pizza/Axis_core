@@ -59,14 +59,15 @@ Canonical requirements:
 
 Repository dependencies:
 
-- `docs/context/axis-core-implementation-brief.md` was not present in this branch,
-  `main`, or the available remote branches when this proposal was drafted. No
-  additional decision is inferred from the missing document.
+- `docs/context/axis-core-implementation-brief.md` is listed as an input dependency.
+  If it is unavailable in this branch, no decision is inferred from it.
 - The account model is an explicit dependency on
   [PR #57](https://github.com/Axis-pizza/axis_core/pull/57). The proposal document from
   that PR was reviewed, but its unresolved decisions remain unresolved here.
 - Fee claims depend on the fee-accounting proposal tracked as P0-FEE-07. This proposal
-  states claim boundaries but does not independently define fee custody or counters.
+  states claim boundaries only. P0-FEE-07 owns the final custody layout, counter
+  layout, partial-versus-all claim behavior, and per-market-versus-shared fee custody
+  decision.
 
 If this document conflicts with a canonical Axis_docs requirement, the canonical
 requirement wins until the conflict is resolved by review.
@@ -494,15 +495,15 @@ subset and validation contract.
 | Writable accounts | User USDC source; user DTF destination; DTF mint; fee vault; fee counters/market; execution source; reserve vaults; only venue accounts required writable by the approved adapter. Config, pricing, and route accounts remain read-only. |
 | Expected token programs | Configured USDC program, approved reserve-asset programs, and approved DTF mint program. Program IDs must match mint owners and policy; Token-2022 extension behavior is not assumed. |
 | Preconditions | Protocol and market allow mint; every asset `mint_enabled`; route/pricing current and enabled; gross input and all minimums valid; net allocations are at least 1 USDC and at most `max_trade_usdc`; price impact within policy; fee config valid; no custody alias. |
-| Validation rules | Compute fee from gross USDC; move/retain fee in separate fee custody; compose only `net_usdc_for_composition`; validate route venue/pool/mints/direction/complexity on-chain; snapshot pre-trade reserve balances, supply, and pre-trade NAV; use approved prices only for actual received reserves; target weights and quotes remain advisory. |
+| Validation rules | Compute fee from gross USDC; move/retain fee in separate fee custody; compose only `net_usdc_for_composition`; validate route venue/pool/mints/direction/complexity on-chain; snapshot pre-trade reserve balances and supply; use approved prices only for actual received reserves; target weights and quotes remain advisory. Any NAV input or supply conversion belongs to the deferred mint-accounting formula. |
 | Allowed CPI | Configured token-program transfers/mint plus an approved controlled/production venue adapter for one bounded route per asset. No arbitrary program, split route, unsupported multi-hop, or SOL intermediary. |
 | State changes | On success only: creator/protocol fee accrual increases by the canonical split; reserve accounting reflects actual balances; DTF supply increases by the amount derived from actual added reserve value. |
 | Token-balance changes | User USDC decreases by gross input; fee vault increases by mint fee; only net USDC is available to execution; reserve vaults increase by observed outputs; user DTF and total supply increase by the same minted amount. |
 | Actual-balance-delta checks | Snapshot before CPI. For each validated reserve vault, `actual_received_i = post - pre > 0` and `>= min_out_i`; input moves only in expected direction; fee-vault increase equals accrued fee; fee vault is not a reserve; DTF destination/supply increase equals computed mint. Quote mismatch is acceptable only when all observed-delta, value, policy, and minimum checks pass. |
-| Postconditions | Mint amount uses actual added reserve value and pre-trade NAV (initial NAV 1 USDC when supply is zero); fees are excluded from reserves/NAV; no partial swap, accrual, or mint survives failure. |
+| Postconditions | Minted DTF is based on actual added reserve value, never a quote or gross USDC input. Fees are excluded from reserves/NAV, and no partial swap, accrual, or mint survives failure. Fixed-point representation, rounding, initial NAV handling, and the final NAV/supply formula are deferred. |
 | Failure conditions | Missing signer; wrong owner/program/mint; paused protocol/market; disabled asset; stale/unapproved route or pricing; policy breach; fee/reserve alias; missing/zero minimum; actual output below per-asset minimum; delta mismatch; arithmetic/pricing/rounding failure. |
 | Expected error/rejection | Static `AUTH`/`OWNER`/`TOKEN`/`STATE`/`POLICY`/`ROUTE`/`FEE` before CPI; `SLIPPAGE`/`DELTA`/`ARITH` after observation and before commit. |
-| Unresolved questions | Exact mint/NAV fixed-point and rounding formula, dust, account ordering, execution source design, route freshness encoding, pricing subset, Token-2022 policy, and adapter ABI. |
+| Unresolved questions | Fixed-point representation, rounding/dust, initial NAV handling, final NAV/supply formula, account ordering, execution source design, route freshness encoding, pricing subset, Token-2022 policy, and adapter ABI. |
 
 ### 8.16 `redeem_dtf_for_usdc`
 
@@ -526,49 +527,55 @@ subset and validation contract.
 | Expected error/rejection | Static `AUTH`/`OWNER`/`TOKEN`/`STATE`/`POLICY`/`ROUTE`/`FEE` before CPI; `SLIPPAGE`/`DELTA`/`ARITH` after observation and before commit. |
 | Unresolved questions | Deterministic rounding/dust, burn timing, settlement-account design, paused/deprecated exit rules, pricing required for redeem, route freshness, token policy, and adapter ABI. |
 
+Fee claim is boundary-level only in this proposal. The following sections preserve the
+required authorization, reserve-separation, and observed-transfer invariants without
+selecting a fee account implementation. P0-FEE-07 owns the final custody layout,
+counter layout, partial-versus-all claim behavior, and per-market-versus-shared fee
+custody decision.
+
 ### 8.17 `claim_creator_fee`
 
 | Field | Proposal |
 |---|---|
 | Intent | Transfer a claimable creator fee from separate USDC fee custody to the market's configured creator fee destination. |
-| Inputs | Claim amount or “all”; exact choice and name depend on P0-FEE-07. |
+| Inputs | Claim request defined by P0-FEE-07. This proposal does not choose partial-versus-all behavior or its encoding. |
 | Required signer(s) | Authority defined for the immutable creator fee destination by P0-FEE-07. |
 | Authority checks | Signer and destination must match the market's stored claim authorization; creator identity alone is insufficient if the configured destination authority differs. |
-| Account roles | Protocol config; market fee state; per-market fee vault or approved fee custody; configured creator destination token account; configured USDC mint/program; reserve vaults read-only only if needed to prove non-aliasing. |
-| Writable accounts | Fee state/counter, fee vault, creator destination. Reserve vaults must never be writable. |
+| Account roles | Protocol config; market fee boundary; fee custody/accounting roles defined by P0-FEE-07; configured creator destination token account; configured USDC mint/program; reserve vaults read-only only if needed to prove non-aliasing. |
+| Writable accounts | Only the fee accounting/custody roles selected by P0-FEE-07 and the creator destination. Reserve vaults must never be writable. |
 | Expected token programs | Configured USDC token program only. |
-| Preconditions | Positive accrued creator balance; sufficient fee custody; destination is valid USDC account; fee vault is not any reserve vault. |
-| Validation rules | Claim cannot exceed creator accrual or custody; protocol accrual unchanged; no destination substitution; prevent replay/double claim; follow P0-FEE-07 rather than redefining counters. |
-| Allowed CPI | One configured USDC transfer from fee custody to creator destination. |
-| State changes | Creator accrued amount decreases by the transferred amount. |
-| Token-balance changes | Fee vault decreases and creator destination increases by the same amount; reserve balances and DTF supply are unchanged. |
-| Actual-balance-delta checks | Observe exact fee-vault decrease and destination increase; account for only token-program behavior permitted by policy; assert zero reserve and supply delta. |
-| Postconditions | Remaining creator accrual equals prior accrual minus claim; protocol accrual and reserves are unchanged; double claim is impossible. |
+| Preconditions | A positive creator entitlement is claimable under P0-FEE-07; selected custody is sufficient; destination is a valid USDC account; fee custody is not any reserve vault. |
+| Validation rules | Fulfilled claim cannot exceed the creator entitlement or selected custody; protocol entitlement is unchanged; no destination substitution; replay/double claim is prevented under the P0-FEE-07 counter model. |
+| Allowed CPI | Configured USDC token transfer as specified by P0-FEE-07. No venue CPI. |
+| State changes | P0-FEE-07 accounting records reduce the creator entitlement by the exact fulfilled claim. Final counter layout is not defined here. |
+| Token-balance changes | Selected fee custody decreases and creator destination increases by the same fulfilled amount; reserve balances and DTF supply are unchanged. |
+| Actual-balance-delta checks | Observe equal selected-custody decrease and destination increase; account for only token-program behavior permitted by policy; assert zero reserve and supply delta. |
+| Postconditions | Creator entitlement is reduced exactly once under P0-FEE-07; protocol entitlement and reserves are unchanged. |
 | Failure conditions | Missing/wrong signer; wrong destination/mint/program; zero/excess claim; insufficient custody; fee/reserve alias; transfer or observed-delta mismatch. |
 | Expected error/rejection | `AUTH`/`OWNER`/`TOKEN`/`FEE` before CPI; `DELTA` after transfer observation. |
-| Unresolved questions | Final instruction name, partial versus all claims, destination authority model, per-market versus shared custody, and exact counter/rounding rules in P0-FEE-07. |
+| Unresolved questions | P0-FEE-07 owns the final custody layout, counter layout, partial-versus-all behavior, per-market-versus-shared custody decision, instruction name, destination authority model, and rounding rules. |
 
 ### 8.18 `claim_protocol_fee`
 
 | Field | Proposal |
 |---|---|
 | Intent | Transfer claimable protocol fees from separate USDC fee custody to the configured protocol treasury. |
-| Inputs | Market and claim amount or “all”; multi-market sweep is not approved by this instruction proposal. |
+| Inputs | Claim request defined by P0-FEE-07. This proposal does not choose partial-versus-all behavior, a per-market claim, or a multi-market sweep. |
 | Required signer(s) | Protocol treasury authority defined by P0-FEE-07/protocol config. |
 | Authority checks | Signer and destination must match current approved treasury authorization; admin authority is not automatically the treasury authority. |
-| Account roles | Protocol config; market fee state; fee vault/custody; configured protocol treasury USDC account; configured USDC mint/program; reserve vaults read-only only if needed for non-alias proof. |
-| Writable accounts | Fee state/counter, fee vault, treasury destination. Reserve vaults must never be writable. |
+| Account roles | Protocol config; market fee boundary; fee custody/accounting roles defined by P0-FEE-07; configured protocol treasury USDC account; configured USDC mint/program; reserve vaults read-only only if needed for non-alias proof. |
+| Writable accounts | Only the fee accounting/custody roles selected by P0-FEE-07 and the treasury destination. Reserve vaults must never be writable. |
 | Expected token programs | Configured USDC token program only. |
-| Preconditions | Positive accrued protocol balance; sufficient custody; valid treasury USDC destination; no reserve alias. |
-| Validation rules | Claim cannot exceed protocol accrual/custody; creator accrual unchanged; destination cannot be caller-substituted; prevent replay/double claim; defer custody/counter design to P0-FEE-07. |
-| Allowed CPI | One configured USDC transfer from fee custody to protocol treasury. |
-| State changes | Protocol accrued amount decreases by transferred amount. |
-| Token-balance changes | Fee vault decreases and treasury increases equally; reserves and DTF supply unchanged. |
-| Actual-balance-delta checks | Observe exact fee-vault decrease and destination increase; assert zero reserve/supply delta. |
-| Postconditions | Remaining protocol accrual equals prior less claim; creator accrual and reserve accounting are unchanged. |
+| Preconditions | A positive protocol entitlement is claimable under P0-FEE-07; selected custody is sufficient; treasury is a valid USDC destination; no reserve alias exists. |
+| Validation rules | Fulfilled claim cannot exceed the protocol entitlement or selected custody; creator entitlement is unchanged; destination cannot be caller-substituted; replay/double claim is prevented under the P0-FEE-07 counter model. |
+| Allowed CPI | Configured USDC token transfer as specified by P0-FEE-07. No venue CPI. |
+| State changes | P0-FEE-07 accounting records reduce the protocol entitlement by the exact fulfilled claim. Final counter layout is not defined here. |
+| Token-balance changes | Selected fee custody decreases and treasury increases by the same fulfilled amount; reserves and DTF supply are unchanged. |
+| Actual-balance-delta checks | Observe equal selected-custody decrease and treasury increase; assert zero reserve/supply delta. |
+| Postconditions | Protocol entitlement is reduced exactly once under P0-FEE-07; creator entitlement and reserve accounting are unchanged. |
 | Failure conditions | Missing/wrong treasury signer; wrong destination/mint/program; zero/excess claim; insufficient custody; alias; delta mismatch. |
 | Expected error/rejection | `AUTH`/`OWNER`/`TOKEN`/`FEE` before CPI; `DELTA` after transfer observation. |
-| Unresolved questions | Final name, partial/all claim, per-market versus multi-market sweep, treasury authority model, shared custody, and P0-FEE-07 counter rules. |
+| Unresolved questions | P0-FEE-07 owns the final custody layout, counter layout, partial-versus-all behavior, per-market-versus-shared custody decision, per-market-versus-multi-market claim behavior, instruction name, treasury authority model, and rounding rules. |
 
 ## 9. Account role matrix
 

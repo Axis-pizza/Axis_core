@@ -53,13 +53,28 @@ state/         ProtocolConfig, DTFMarket with the inline asset table
 
 19 host tests cover the arithmetic invariants and the account layout.
 
-## What is not implemented yet, and why
+## Building
 
-Instruction handlers, token movement, and the swap CPI. `cargo build-sbf`
-does not run on the current dev machine, so there is no `.so`, LiteSVM cannot
-load the program, and nothing involving CPI can be executed or tested. The
-parts above are the parts that are host-testable, and they are the parts
-where the value invariants live.
+```bash
+./scripts/build-sbf.sh
+```
+
+Produces `target/deploy/axis_core.so`, which the LiteSVM integration tests
+load and execute. The script exists because stock `cargo build-sbf` fails
+twice on this workspace: it mis-parses an already-linked Solana toolchain, and
+the platform-tools shipped with solana-cli 3.0.15 carry rustc 1.84 while
+pinocchio needs 1.89. The script unlinks before and after, and pins
+platform-tools v1.57 with rustc 1.95 without touching the solana-cli install.
+
+## What is not implemented yet
+
+Token movement and the swap CPI, so `Mint`, `Redeem` and `RedeemInKind` are
+not here. `InitializeProtocolConfig` and `CreateMarket` are, and they run
+on-chain under LiteSVM.
+
+Account creation is not done through a System Program CPI yet either: both
+handlers expect an allocated, program-owned, zeroed account, which is the
+state a `create_account` CPI leaves behind.
 
 Two interface questions must be settled before the handlers are written:
 

@@ -1,8 +1,10 @@
 //! Protocol constants. See Axis_docs `specs/constants.md` and `01` §30.
 
-/// Markets hold 2 to 3 assets. The upper bound is measured, not chosen: an
-/// atomic 3-leg mint fits the 64 account-lock cap and a 4-leg mint does not.
-/// Evidence: Axis_docs `docs/spikes/2026-09-10-rebalance-and-mint-locks/`.
+/// Markets hold 2 to 3 assets. Three is the v1 product ceiling; it does not
+/// guarantee that every 3-asset composition or trade fits the account-lock
+/// cap. Supported quotes are checked separately in both directions.
+/// Preliminary evidence: Axis_docs
+/// `docs/spikes/2026-09-10-rebalance-and-mint-locks/`.
 pub const MIN_ASSETS: usize = 2;
 pub const MAX_ASSETS: usize = 3;
 

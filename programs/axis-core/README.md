@@ -5,9 +5,11 @@ Reserve-backed DTF program for Axis v1.
 ## What v1 is
 
 One atomic transaction per mint and per USDC redeem, at most 3 assets per
-market, with `RedeemInKind` available unconditionally underneath. The 3-asset
-cap is measured, not chosen: an atomic 3-leg mint fits the 64 account-lock
-limit and a 4-leg mint does not. Evidence and scripts live in Axis_docs
+market, with `RedeemInKind` available unconditionally underneath. Three assets
+is the v1 product ceiling, not a guarantee that every 3-asset composition or
+trade size fits. Mint and USDC Redeem availability is checked separately for
+each quote; Mint is refused when the reverse USDC Redeem check fails. Preliminary
+account-budget evidence and scripts live in Axis_docs
 `docs/spikes/2026-09-10-rebalance-and-mint-locks/`.
 
 No keeper, no escrow, no off-chain executor. See Axis_docs
@@ -35,13 +37,17 @@ mispriced-asset over-mint that a value-weighted derivation admits.
 
 ## Account budget
 
-11 fixed accounts plus one reserve vault per asset, so 14 at 3 assets, for
-mint and for redeem alike. The symmetry is required: the backend refuses a
-mint whenever the USDC redeem check is failing, so a heavier redeem list
-would close mint too.
+The provisional interface target is 11 fixed accounts plus one reserve vault
+per asset, so 14 at 3 assets, before variable route accounts and cross-set
+deduplication. Mint and Redeem target the same base shape. The backend refuses
+a mint whenever the reverse USDC redeem check is failing, so a heavier redeem
+list would close mint too.
 
 That budget is why the asset table is inline in `DTFMarket` rather than one
-account per asset, and why `ProtocolConfig` is not read during a mint.
+account per asset, and why the proposed Mint path does not read
+`ProtocolConfig`. The production handlers must reconcile their actual account
+lists against this target before it becomes a certified ABI or execution
+result.
 
 ## What is implemented here
 

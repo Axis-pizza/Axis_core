@@ -38,6 +38,14 @@ Build the SBF artifact before running the integration tests:
 It writes `target/deploy/axis_core.so`, which
 `crates/axis-core-test-utils/tests/program_invocation.rs` loads and executes.
 
+Run the opt-in SBF integration target after building the artifact:
+
+```bash
+cargo test -p axis-core-test-utils \
+  --features sbf-integration \
+  --test program_invocation
+```
+
 ```txt
 AXIS_CORE_PROGRAM_ARTIFACT     optional path override
 AXIS_PLATFORM_TOOLS            optional platform-tools version, default v1.57
@@ -45,9 +53,10 @@ target/deploy/axis_core.so     default workspace-relative path
 ```
 
 If the artifact is missing, the smoke test reports the blocker and does not
-pretend the program was loaded. The invocation tests fail outright rather than
-skipping, because a silently skipped integration test is how a broken
-toolchain stays invisible.
+pretend the program was loaded. The opt-in invocation target fails outright
+rather than skipping, because a silently skipped integration test is how a
+broken toolchain stays invisible. Normal `cargo test` does not select that
+target, so a clean host-only CI checkout does not require Solana SBF tooling.
 
 ## Why the SBF build needs a script
 

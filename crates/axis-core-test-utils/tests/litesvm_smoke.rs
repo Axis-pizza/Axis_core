@@ -43,7 +43,7 @@ fn axis_core_artifact_path_and_load_diagnostics_are_exercised() {
         Err(AxisTestError::MissingProgramArtifact { path, diagnostic }) => {
             assert_eq!(path, expected_path);
             assert!(diagnostic.contains("not found"));
-            assert!(diagnostic.contains("Solana SBF build tooling is deferred"));
+            assert!(diagnostic.contains("scripts/build-sbf.sh"));
             eprintln!("{diagnostic}");
         }
         Err(err) => panic!("unexpected Axis Core artifact load failure: {err}"),
@@ -67,7 +67,7 @@ fn missing_program_artifact_has_clear_diagnostic() {
             assert_eq!(path, missing_path);
             assert!(diagnostic.contains("not found"));
             assert!(diagnostic.contains("AXIS_CORE_PROGRAM_ARTIFACT"));
-            assert!(diagnostic.contains("do not treat the program as loaded"));
+            assert!(diagnostic.contains("Do not treat the program as loaded"));
         }
         err => panic!("expected missing artifact diagnostic, got {err}"),
     }
@@ -92,7 +92,7 @@ fn invalid_program_artifact_has_clear_diagnostic() {
             assert_eq!(path, invalid_path);
             assert!(diagnostic.contains("invalid"));
             assert!(diagnostic.contains("LiteSVM failed to load it"));
-            assert!(diagnostic.contains("do not treat the program as loaded"));
+            assert!(diagnostic.contains("Do not treat the program as loaded"));
         }
         err => panic!("expected invalid artifact diagnostic, got {err}"),
     }

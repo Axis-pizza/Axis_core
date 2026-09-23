@@ -20,6 +20,7 @@ Deferred responsibilities:
 - protocol account builders
 - mint, redeem, fee, routing, custody, DEX CPI, and Token-2022 business-flow tests
 
-Program loading expects a LiteSVM-loadable Solana SBF shared object. Until SBF
-tooling is documented for this workspace, a missing `target/deploy/axis_core.so`
-is reported as a blocker instead of being treated as a successful load.
+Program loading expects a LiteSVM-loadable Solana SBF shared object. Build it
+with `scripts/build-sbf.sh`, then run the opt-in `program_invocation` target
+with the `sbf-integration` feature. A missing `target/deploy/axis_core.so` is
+reported as a blocker instead of being treated as a successful load.

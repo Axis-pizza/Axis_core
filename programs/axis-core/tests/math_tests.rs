@@ -1,11 +1,9 @@
 //! Value arithmetic. These are the invariants that decide whether a holder's
 //! backing can be diluted, so they are tested by sweep rather than by example.
 
-use axis_core::constants::{BPS_DENOMINATOR, MINIMUM_LIQUIDITY};
+use axis_core::constants::MINIMUM_LIQUIDITY;
 use axis_core::error::AxisCoreError;
-use axis_core::math::{
-    mint_fee, pro_rata_release, redeemable_supply, required_delivery, split_fee,
-};
+use axis_core::math::{fee, pro_rata_release, redeemable_supply, required_delivery};
 
 #[test]
 fn required_delivery_rounds_up_and_release_rounds_down() {
@@ -108,31 +106,21 @@ fn extreme_values_overflow_rather_than_wrap() {
 }
 
 #[test]
-fn mint_fee_is_charged_on_spent_usdc_not_on_the_gross_amount() {
-    // 100 USDC spent at 100 bps.
-    assert_eq!(mint_fee(100_000_000, 100).unwrap(), 1_000_000);
-    // Nothing spent, nothing charged: a delivery-driven mint refunds whatever
-    // the legs did not consume, and refunded money must not be taxed.
-    assert_eq!(mint_fee(0, 100).unwrap(), 0);
-    assert_eq!(mint_fee(100_000_000, 0).unwrap(), 0);
+fn fee_is_thirty_bps_rounded_down() {
+    // 100 USDC at 30 bps.
+    assert_eq!(fee(100_000_000), 300_000);
+    // 334 * 30 / 10_000 = 1.002, and 333 rounds to nothing.
+    assert_eq!(fee(334), 1);
+    assert_eq!(fee(333), 0);
+    assert_eq!(fee(0), 0);
 }
 
 #[test]
-fn fee_split_is_exact_and_leaves_no_dust() {
-    for fee in [0u64, 1, 2, 3, 7, 999, 1_000_000, u64::MAX / 10_000] {
-        for share in [0u16, 1, 4_000, 6_000, 9_999, 10_000] {
-            let (creator, protocol) = split_fee(fee, share).unwrap();
-            assert_eq!(
-                creator.checked_add(protocol).unwrap(),
-                fee,
-                "split lost value: fee={fee} share={share}"
-            );
-        }
+fn fee_never_exceeds_its_base() {
+    for amount in [1u64, 999, 1_000_000, u64::MAX / 2, u64::MAX] {
+        assert!(fee(amount) <= amount, "fee exceeded base at {amount}");
     }
-    assert_eq!(
-        split_fee(1_000, (BPS_DENOMINATOR + 1) as u16),
-        Err(AxisCoreError::InvalidFeeConfig)
-    );
+    assert_eq!(fee(u64::MAX), ((u64::MAX as u128 * 30) / 10_000) as u64);
 }
 
 #[test]

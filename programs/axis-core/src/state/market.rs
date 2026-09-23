@@ -1,6 +1,6 @@
 use crate::constants::{MAX_ASSETS, MIN_ASSETS, MIN_WEIGHT_BPS, TOTAL_WEIGHT_BPS};
 use crate::error::AxisCoreError;
-use crate::state::{read_address, read_u16, read_u64};
+use crate::state::{read_address, read_u16};
 use pinocchio::Address;
 
 #[repr(u8)]
@@ -62,38 +62,37 @@ impl MarketAsset {
     pub const LEN: usize = 67;
 }
 
-/// DTFMarket. PDA seeds: `["market", dtf_mint]`, and the PDA is also the
-/// reserve authority and the DTF mint authority.
+/// DTFMarket. PDA seeds: `["market", dtf_mint]` at the canonical bump, so a
+/// DTF mint has at most one market. The PDA is also the reserve authority and
+/// the DTF mint authority.
 ///
-/// Layout (301 bytes):
-/// [0..8]     discriminator b"dtfmkt03"
+/// Layout (308 bytes):
+/// [0..8]     discriminator b"dtfmkt04"
 /// [8..40]    creator
 /// [40..72]   dtf_mint
-/// [72..104]  creator_fee_destination
-/// [104..112] accrued_creator_fee_usdc
-/// [112..120] accrued_protocol_fee_usdc
-/// [120..122] mint_fee_bps         (snapshot, immutable)
-/// [122..124] creator_share_bps    (snapshot, immutable)
-/// [124]      asset_count
-/// [125]      status
-/// [126]      bump
-/// [127..328] assets, MAX_ASSETS * MarketAsset::LEN
+/// [72..104]  treasury     (snapshot of ProtocolConfig::protocol_treasury, immutable)
+/// [104]      asset_count
+/// [105]      status
+/// [106]      bump
+/// [107..308] assets, MAX_ASSETS * MarketAsset::LEN
+///
+/// The fee rate is the constant `FEE_BPS` and is paid out in the same
+/// instruction, so no fee terms or balances are stored. The treasury is
+/// snapshotted so Mint and Redeem can pay the fee without loading
+/// `ProtocolConfig`, and so a later protocol change cannot redirect the fees of
+/// an existing market.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DTFMarket {
     pub creator: Address,
     pub dtf_mint: Address,
-    pub creator_fee_destination: Address,
-    pub accrued_creator_fee_usdc: u64,
-    pub accrued_protocol_fee_usdc: u64,
-    pub mint_fee_bps: u16,
-    pub creator_share_bps: u16,
+    pub treasury: Address,
     pub asset_count: u8,
     pub status: MarketStatus,
     pub bump: u8,
     pub assets: [Option<MarketAsset>; MAX_ASSETS],
 }
 
-const ASSETS_OFFSET: usize = 127;
+const ASSETS_OFFSET: usize = 107;
 
 impl DTFMarket {
     pub const DISCRIMINATOR: [u8; 8] = *b"dtfmkt03";
@@ -146,14 +145,10 @@ impl DTFMarket {
         dst[0..8].copy_from_slice(&Self::DISCRIMINATOR);
         dst[8..40].copy_from_slice(self.creator.as_ref());
         dst[40..72].copy_from_slice(self.dtf_mint.as_ref());
-        dst[72..104].copy_from_slice(self.creator_fee_destination.as_ref());
-        dst[104..112].copy_from_slice(&self.accrued_creator_fee_usdc.to_le_bytes());
-        dst[112..120].copy_from_slice(&self.accrued_protocol_fee_usdc.to_le_bytes());
-        dst[120..122].copy_from_slice(&self.mint_fee_bps.to_le_bytes());
-        dst[122..124].copy_from_slice(&self.creator_share_bps.to_le_bytes());
-        dst[124] = self.asset_count;
-        dst[125] = self.status as u8;
-        dst[126] = self.bump;
+        dst[72..104].copy_from_slice(self.treasury.as_ref());
+        dst[104] = self.asset_count;
+        dst[105] = self.status as u8;
+        dst[106] = self.bump;
 
         for (i, slot) in self.assets.iter().enumerate() {
             let base = ASSETS_OFFSET + i * MarketAsset::LEN;
@@ -178,7 +173,7 @@ impl DTFMarket {
         if src[0..8] != Self::DISCRIMINATOR {
             return Err(AxisCoreError::InvalidDiscriminator);
         }
-        let asset_count = src[124];
+        let asset_count = src[104];
         if asset_count as usize > MAX_ASSETS {
             return Err(AxisCoreError::TooManyAssets);
         }
@@ -201,14 +196,10 @@ impl DTFMarket {
         Ok(Self {
             creator: read_address(&src[8..40]),
             dtf_mint: read_address(&src[40..72]),
-            creator_fee_destination: read_address(&src[72..104]),
-            accrued_creator_fee_usdc: read_u64(&src[104..112])?,
-            accrued_protocol_fee_usdc: read_u64(&src[112..120])?,
-            mint_fee_bps: read_u16(&src[120..122])?,
-            creator_share_bps: read_u16(&src[122..124])?,
+            treasury: read_address(&src[72..104]),
             asset_count,
-            status: MarketStatus::try_from(src[125])?,
-            bump: src[126],
+            status: MarketStatus::try_from(src[105])?,
+            bump: src[106],
             assets,
         })
     }

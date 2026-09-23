@@ -57,39 +57,17 @@ pub fn pro_rata_release(reserve_balance: u64, dtf_in: u64, total_supply: u64) ->
     u64::try_from(released).map_err(|_| AxisCoreError::MathOverflow)
 }
 
-/// Mint fee taken from the USDC the mint actually spends.
+/// The Mint and Redeem fee on `amount`, at the fixed `FEE_BPS`, rounded down.
 ///
-/// The base is spent USDC, never the gross amount the user supplied: a
-/// delivery-driven mint returns whatever the legs did not consume, and
-/// charging a fee on refunded money would be a fee on nothing.
-pub fn mint_fee(spent_usdc: u64, mint_fee_bps: u16) -> Result<u64> {
-    let fee = (spent_usdc as u128)
-        .checked_mul(mint_fee_bps as u128)
-        .ok_or(AxisCoreError::MathOverflow)?
-        / (BPS as u128);
-    u64::try_from(fee).map_err(|_| AxisCoreError::MathOverflow)
-}
-
-/// Split an accrued fee into the creator and protocol shares.
-///
-/// The protocol takes the remainder rather than a second multiplication, so
-/// the two shares always re-add to the input exactly and no dust escapes.
-pub fn split_fee(fee_usdc: u64, creator_share_bps: u16) -> Result<(u64, u64)> {
-    if creator_share_bps as u64 > BPS {
-        return Err(AxisCoreError::InvalidFeeConfig);
-    }
-    let creator = (fee_usdc as u128)
-        .checked_mul(creator_share_bps as u128)
-        .ok_or(AxisCoreError::MathOverflow)?
-        / (BPS as u128);
-    let creator = u64::try_from(creator).map_err(|_| AxisCoreError::MathOverflow)?;
-    let protocol = fee_usdc
-        .checked_sub(creator)
-        .ok_or(AxisCoreError::MathOverflow)?;
-    Ok((creator, protocol))
+/// The caller chooses the base. `FEE_BPS` is below the denominator, so the fee
+/// never exceeds `amount` and the result always fits.
+pub fn fee(amount: u64) -> u64 {
+    ((amount as u128 * FEE_BPS as u128) / BPS as u128) as u64
 }
 
 const BPS: u64 = crate::constants::BPS_DENOMINATOR;
+const FEE_BPS: u64 = crate::constants::FEE_BPS;
+const _: () = assert!(FEE_BPS < BPS);
 
 /// Supply that may still be redeemed, excluding the permanently locked
 /// MINIMUM_LIQUIDITY.

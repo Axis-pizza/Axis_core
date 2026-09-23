@@ -29,16 +29,22 @@ fn market(assets: Vec<MarketAsset>) -> DTFMarket {
     DTFMarket {
         creator: addr(1),
         dtf_mint: addr(2),
-        creator_fee_destination: addr(3),
-        accrued_creator_fee_usdc: 111,
-        accrued_protocol_fee_usdc: 222,
-        mint_fee_bps: 100,
-        creator_share_bps: 4_000,
+        treasury: addr(3),
         asset_count: count,
         status: MarketStatus::Active,
         bump: 254,
         assets: slots,
     }
+}
+
+/// The byte counts in the layout comments are what clients size accounts and
+/// offsets from, so they are pinned here rather than trusted.
+#[test]
+fn account_sizes_match_the_documented_layouts() {
+    assert_eq!(MarketAsset::LEN, 67);
+    assert_eq!(DTFMarket::LEN, 308);
+    assert_eq!(DTFMarket::LEN, 107 + MAX_ASSETS * MarketAsset::LEN);
+    assert_eq!(ProtocolConfig::LEN, 105);
 }
 
 #[test]
@@ -174,38 +180,27 @@ fn an_asset_count_beyond_the_cap_is_refused_at_decode_time() {
     ]);
     let mut buf = vec![0u8; DTFMarket::LEN];
     m.pack(&mut buf).unwrap();
-    buf[124] = (MAX_ASSETS + 1) as u8;
+    buf[104] = (MAX_ASSETS + 1) as u8;
     assert_eq!(DTFMarket::unpack(&buf), Err(AxisCoreError::TooManyAssets));
 }
 
 #[test]
-fn protocol_config_round_trips_and_rejects_a_fee_above_its_own_cap() {
+fn protocol_config_round_trips() {
     let config = ProtocolConfig {
         protocol_authority: addr(1),
         usdc_mint: addr(2),
         protocol_treasury: addr(3),
-        mint_fee_bps: 100,
-        creator_share_bps: 4_000,
-        max_mint_fee_bps: 300,
         bump: 255,
     };
-    config.validate().unwrap();
-
     let mut buf = vec![0u8; ProtocolConfig::LEN];
     config.pack(&mut buf).unwrap();
     assert_eq!(ProtocolConfig::unpack(&buf).unwrap(), config);
 
-    let over = ProtocolConfig {
-        mint_fee_bps: 301,
-        ..config.clone()
-    };
-    assert_eq!(over.validate(), Err(AxisCoreError::InvalidFeeConfig));
-
-    let bad_share = ProtocolConfig {
-        creator_share_bps: 10_001,
-        ..config
-    };
-    assert_eq!(bad_share.validate(), Err(AxisCoreError::InvalidFeeConfig));
+    let mut small = vec![0u8; ProtocolConfig::LEN - 1];
+    assert_eq!(
+        config.pack(&mut small),
+        Err(AxisCoreError::InvalidAccountData)
+    );
 }
 
 #[test]

@@ -13,13 +13,6 @@ pub(crate) fn read_address(src: &[u8]) -> Address {
     Address::from(bytes)
 }
 
-pub(crate) fn read_u64(src: &[u8]) -> Result<u64, AxisCoreError> {
-    let bytes: [u8; 8] = src[0..8]
-        .try_into()
-        .map_err(|_| AxisCoreError::InvalidAccountData)?;
-    Ok(u64::from_le_bytes(bytes))
-}
-
 pub(crate) fn read_u16(src: &[u8]) -> Result<u16, AxisCoreError> {
     let bytes: [u8; 2] = src[0..2]
         .try_into()

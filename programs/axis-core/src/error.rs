@@ -17,6 +17,8 @@ pub enum AxisCoreError {
     UnauthorizedProtocolAuthority = 10,
     UnauthorizedUser = 11,
     MathOverflow = 12,
+    /// A program or loader account is not the one the instruction requires.
+    InvalidProgramAccount = 13,
 
     // Market composition
     TooFewAssets = 20,
@@ -35,7 +37,6 @@ pub enum AxisCoreError {
 
     // Value
     ZeroAmount = 40,
-    InvalidFeeConfig = 41,
     /// A swap leg delivered less than the mint required for that asset.
     InsufficientDelivery = 42,
     SlippageExceeded = 43,

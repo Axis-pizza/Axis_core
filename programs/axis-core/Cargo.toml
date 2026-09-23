@@ -14,7 +14,7 @@ default = []
 bpf-entrypoint = []
 
 [dependencies]
-pinocchio.workspace = true
+pinocchio = { workspace = true, features = ["cpi"] }
 
 # Host-only. `Address::create_program_address` is a syscall on the Solana
 # target and needs curve25519 to run in host unit tests. Not compiled into

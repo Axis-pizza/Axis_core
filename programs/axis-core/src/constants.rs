@@ -19,8 +19,9 @@ pub const MINIMUM_LIQUIDITY: u64 = 1_000;
 /// Basis-point denominator for every fee and weight calculation.
 pub const BPS_DENOMINATOR: u64 = 10_000;
 
-/// Fee on Mint and on Redeem, sent to the market's treasury in the same
-/// instruction (2026-09-18 decision). There is no fee vault, no claim and no
+/// Fee on Mint, Redeem and RedeemInKind (2026-09-18 decision), taken in DTF
+/// and sent to the treasury's DTF account in the same instruction (Core
+/// direction 2026-10-08, CANDIDATE-10). There is no fee vault, no claim and no
 /// creator share, so there is nothing to configure or accrue.
 pub const FEE_BPS: u64 = 30;
 

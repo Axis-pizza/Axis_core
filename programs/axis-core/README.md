@@ -50,8 +50,9 @@ list would close mint too.
 
 That budget is why the asset table is inline in `DTFMarket` rather than one
 account per asset, and why the proposed Mint path does not read
-`ProtocolConfig`. The Treasury fee destination takes the slot the prototype's
-fee vault held, so the target is unchanged by the fee decision. The production
+`ProtocolConfig`. The treasury's DTF account takes the slot the prototype's
+fee vault held, so the target is unchanged by the fee decision. RedeemInKind
+names that account too, one more than before. The production
 handlers must reconcile their actual account lists against this target before
 it becomes a certified ABI or execution result.
 
@@ -64,17 +65,26 @@ state/         ProtocolConfig (105 bytes), DTFMarket (308 bytes, inline asset ta
 instructions/  InitializeProtocolConfig, CreateMarket, PDA creation
 ```
 
-The fee is 30 bps on Mint and on Redeem, paid to the market's treasury in the
-same instruction. There is no fee vault, no claim instruction, and no creator
-share, so no fee state is stored. `DTFMarket` snapshots the treasury from
-`ProtocolConfig` at creation, so Mint and Redeem never load `ProtocolConfig`.
+The fee is 30 bps, taken in DTF on Mint, Redeem and RedeemInKind, and sent to
+the treasury's DTF token account in the same instruction (Core direction
+2026-10-08, closing Axis_docs CANDIDATE-10; product sign-off pending on PR
+#61):
 
-What the 30 bps is measured on is still open (Axis_docs CANDIDATE-10: a USDC
-fee measured on the user's named account can be avoided by funding the route
-from another account). The answer can still move the layout. Charged in USDC,
-Mint and Redeem also need the USDC mint's identity to check the Treasury
-account, so `DTFMarket` would snapshot `usdc_mint` too (340 bytes) or Mint
-would load `ProtocolConfig`. Charged in DTF, neither is needed.
+```txt
+Mint                 fee = floor(gross * 30 / 10_000), minted to the treasury
+                     gross - fee minted to the user
+Redeem, RedeemInKind fee = floor(dtf_in * 30 / 10_000), transferred to the treasury
+                     dtf_in - fee burned and released pro rata
+```
+
+Core mints and burns the DTF itself, so the fee holds against any transaction
+a caller builds. A USDC fee would not: Core reads no price, so it sees only the
+USDC that passes through the account the caller names. RedeemInKind can charge
+the fee without weakening the exit, since the holder pays in the DTF being
+redeemed. There is no fee vault, no claim instruction, and no creator share, so
+no fee state is stored. `DTFMarket` snapshots the treasury owner from
+`ProtocolConfig` at creation, so no value path loads `ProtocolConfig` and none
+needs the USDC mint's identity.
 
 Both instructions create their own PDA through the System Program at the
 canonical bump, and still succeed if someone pre-funded the address.
@@ -160,10 +170,11 @@ not carried into v2.
   the DTF mint and Axis Core; after it, every reserve vault keeps its owner,
   length and Initialized state, with no delegate and no close authority. Per-leg
   `min_out` and aggregate `min_usdc_out` are enforced on measured deltas.
-- **Alternative for Redeem, not decided.** Core releases `release_i` to
+- **Alternative for Redeem, not proposed.** Core releases `release_i` to
   accounts the user controls and the user signs the swaps, so Core's signature
-  never enters a route and CANDIDATE-07 disappears. The cost is that the
-  aggregate `min_usdc_out` and a USDC-denominated fee move out of Core.
+  never enters a route and CANDIDATE-07 disappears. With the fee in DTF this
+  no longer costs the fee, but it costs about N + 2 locks (the holder's asset
+  accounts and their creation), which the 3-asset estimates cannot absorb.
 
 ### Evidence
 

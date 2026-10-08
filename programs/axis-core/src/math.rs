@@ -57,10 +57,11 @@ pub fn pro_rata_release(reserve_balance: u64, dtf_in: u64, total_supply: u64) ->
     u64::try_from(released).map_err(|_| AxisCoreError::MathOverflow)
 }
 
-/// The Mint and Redeem fee on `amount`, at the fixed `FEE_BPS`, rounded down.
+/// The fee on a DTF `amount`, at the fixed `FEE_BPS`, rounded down: the gross
+/// DTF a mint earns, or the DTF a redeem hands in.
 ///
-/// The caller chooses the base. `FEE_BPS` is below the denominator, so the fee
-/// never exceeds `amount` and the result always fits.
+/// `FEE_BPS` is below the denominator, so the fee never exceeds `amount` and
+/// the result always fits.
 pub fn fee(amount: u64) -> u64 {
     ((amount as u128 * FEE_BPS as u128) / BPS as u128) as u64
 }

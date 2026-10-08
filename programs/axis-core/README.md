@@ -81,7 +81,7 @@ canonical bump, and still succeed if someone pre-funded the address.
 `InitializeProtocolConfig` requires the program's upgrade authority, so it must
 run before the program is finalized.
 
-20 host tests cover the arithmetic invariants and the account layout; 12
+21 host tests cover the arithmetic invariants and the account layout; 12
 LiteSVM tests run both instructions on-chain without pre-injecting any
 Axis-owned account.
 

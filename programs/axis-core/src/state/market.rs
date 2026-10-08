@@ -95,7 +95,7 @@ pub struct DTFMarket {
 const ASSETS_OFFSET: usize = 107;
 
 impl DTFMarket {
-    pub const DISCRIMINATOR: [u8; 8] = *b"dtfmkt03";
+    pub const DISCRIMINATOR: [u8; 8] = *b"dtfmkt04";
     pub const LEN: usize = ASSETS_OFFSET + MAX_ASSETS * MarketAsset::LEN;
 
     /// Live constituents, in index order.

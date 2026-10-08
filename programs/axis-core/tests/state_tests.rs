@@ -82,6 +82,29 @@ fn a_short_buffer_is_rejected_rather_than_read_past_the_end() {
     );
 }
 
+/// Regression: the 308-byte layout first shipped under `dtfmkt03`, the tag of
+/// the previous 328-byte layout. `unpack` only checks for a minimum length, so
+/// a 328-byte account would have decoded with every field after `status`
+/// shifted.
+#[test]
+fn the_previous_328_byte_layout_is_rejected_by_its_discriminator() {
+    let m = market(vec![
+        asset(10, 20, 5_000, TokenProgramKind::LegacySplToken),
+        asset(11, 21, 5_000, TokenProgramKind::LegacySplToken),
+    ]);
+    let mut current = vec![0u8; DTFMarket::LEN];
+    m.pack(&mut current).unwrap();
+    assert_eq!(&current[0..8], b"dtfmkt04");
+
+    let mut previous = vec![0u8; 328];
+    m.pack(&mut previous).unwrap();
+    previous[0..8].copy_from_slice(b"dtfmkt03");
+    assert_eq!(
+        DTFMarket::unpack(&previous),
+        Err(AxisCoreError::InvalidDiscriminator)
+    );
+}
+
 #[test]
 fn a_foreign_discriminator_is_rejected() {
     let mut buf = vec![0u8; DTFMarket::LEN];

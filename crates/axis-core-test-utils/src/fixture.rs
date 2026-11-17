@@ -117,6 +117,11 @@ pub fn encode_legs(legs: &[Leg]) -> (Vec<u8>, Vec<AccountMeta>) {
 pub struct MarketSpec {
     pub label: &'static str,
     pub dtf_kind: TokenProgramKind,
+    /// Token program of every constituent mint and reserve vault.
+    pub asset_kind: TokenProgramKind,
+    /// Create Token-2022 reserve vaults with the `ImmutableOwner` extension,
+    /// as the associated token program does.
+    pub immutable_owner_vaults: bool,
     pub reference_supply: u64,
     pub reference_amounts: Vec<u64>,
     pub min_liquidity: u64,
@@ -130,6 +135,8 @@ impl MarketSpec {
         Self {
             label,
             dtf_kind: TokenProgramKind::Token2022,
+            asset_kind: TokenProgramKind::LegacySplToken,
+            immutable_owner_vaults: false,
             reference_supply: 1_000,
             reference_amounts: vec![2_000, 5_000],
             min_liquidity: 1_000,
@@ -143,6 +150,7 @@ pub struct MarketFixture {
     pub market: Address,
     pub dtf_mint: Address,
     pub dtf_kind: TokenProgramKind,
+    pub asset_kind: TokenProgramKind,
     pub liquidity_lock: Address,
     pub treasury_dtf: Address,
     pub asset_mints: Vec<Address>,
@@ -375,6 +383,28 @@ impl Env {
         address_of(&account)
     }
 
+    /// A Token-2022 account carrying exactly the `ImmutableOwner` extension.
+    pub fn create_immutable_owner_account(&mut self, mint: &Address, owner: &Address) -> Address {
+        const LEN: usize = 170;
+        let account = self.next_keypair("immutable-owner-account");
+        let program = token_2022_program_id();
+        let deployer = self.deployer.insecure_clone();
+        let create = solana_system_interface::instruction::create_account(
+            &deployer.pubkey(),
+            &account.pubkey(),
+            self.vm.minimum_balance_for_rent_exemption(LEN),
+            LEN as u64,
+            &program,
+        );
+        let immutable = token_instruction::initialize_immutable_owner(&program, &account.pubkey())
+            .expect("initialize_immutable_owner");
+        let init = token_instruction::initialize_account3(&program, &account.pubkey(), mint, owner)
+            .expect("initialize_account3");
+        self.send(&[create, immutable, init], &[&deployer, &account])
+            .expect("create immutable-owner account");
+        address_of(&account)
+    }
+
     /// Mints fixture USDC or a constituent. Not usable for a DTF: only the
     /// market PDA can mint those.
     pub fn mint_tokens(
@@ -455,12 +485,12 @@ impl Env {
         let mut asset_mints = Vec::new();
         let mut vaults = Vec::new();
         for _ in &spec.reference_amounts {
-            let mint = self.create_mint(TokenProgramKind::LegacySplToken, None, None);
-            vaults.push(self.create_token_account(
-                TokenProgramKind::LegacySplToken,
-                &mint,
-                &market,
-            ));
+            let mint = self.create_mint(spec.asset_kind, None, None);
+            vaults.push(if spec.immutable_owner_vaults {
+                self.create_immutable_owner_account(&mint, &market)
+            } else {
+                self.create_token_account(spec.asset_kind, &mint, &market)
+            });
             asset_mints.push(mint);
         }
 
@@ -468,6 +498,7 @@ impl Env {
             market,
             dtf_mint,
             dtf_kind: spec.dtf_kind,
+            asset_kind: spec.asset_kind,
             liquidity_lock,
             treasury_dtf,
             asset_mints,
@@ -535,7 +566,7 @@ impl Env {
         let assets = market
             .asset_mints
             .iter()
-            .map(|mint| self.create_token_account(TokenProgramKind::LegacySplToken, mint, &owner))
+            .map(|mint| self.create_token_account(market.asset_kind, mint, &owner))
             .collect();
         Trader {
             keypair,
@@ -558,7 +589,7 @@ impl Env {
     pub fn fund_assets(&mut self, market: &MarketFixture, trader: &Trader, amounts: &[u64]) {
         for ((mint, account), amount) in market.asset_mints.iter().zip(&trader.assets).zip(amounts)
         {
-            self.mint_tokens(TokenProgramKind::LegacySplToken, mint, account, *amount);
+            self.mint_tokens(market.asset_kind, mint, account, *amount);
         }
     }
 

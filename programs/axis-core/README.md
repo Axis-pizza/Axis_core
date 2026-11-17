@@ -213,7 +213,7 @@ toolchain-link bug in `cargo build-sbf`. Its install step expects solana-cli
 3.x; with an older CLI, install the tools once with
 `cargo build-sbf --force-tools-install --tools-version v1.57`.
 
-25 host tests cover the arithmetic and the account layouts. 45 LiteSVM tests
+25 host tests cover the arithmetic and the account layouts. 48 LiteSVM tests
 run every instruction on the SBF artifact through its real entry point,
 without injecting any Axis-owned account.
 

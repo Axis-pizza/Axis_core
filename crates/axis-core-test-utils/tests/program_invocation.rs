@@ -1622,6 +1622,149 @@ fn a_three_asset_market_purchases_and_redeems_on_both_paths() {
 }
 
 // ---------------------------------------------------------------------------
+// Token-2022 constituents and direct transfers
+// ---------------------------------------------------------------------------
+
+/// Constituents under Token-2022, in reserve vaults that carry the
+/// `ImmutableOwner` extension the associated token program adds. The route
+/// stand-in here is the Token-2022 program, so legs can only deliver
+/// constituents; the buyer's USDC does not move.
+#[test]
+fn token_2022_constituents_are_purchased_and_redeemed_in_kind() {
+    let mut env = Env::new();
+    let mut spec = MarketSpec::two_assets("token-2022-assets");
+    spec.asset_kind = TokenProgramKind::Token2022;
+    spec.immutable_owner_vaults = true;
+    spec.swap_program = token_2022_program_id();
+    let market = env.create_market(&spec);
+    for asset in market_state(&env, &market).assets() {
+        assert_eq!(asset.token_program, TokenProgramKind::Token2022);
+    }
+    assert_eq!(
+        env.vm.get_account(&market.vaults[0]).unwrap().data.len(),
+        170
+    );
+
+    let maker = maker(&mut env, &market);
+    let alice = buyer(&mut env, "alice", &market, ALICE_USDC);
+    let deliver = |deliveries: [u64; 2]| -> Vec<Leg> {
+        (0..2)
+            .map(|i| {
+                transfer_leg(
+                    &maker.assets[i],
+                    &market.vaults[i],
+                    &maker.address(),
+                    deliveries[i],
+                )
+            })
+            .collect()
+    };
+
+    let ix = env.purchase_ix(
+        &market,
+        true,
+        &alice,
+        0,
+        98_700,
+        &deliver([200_000, 500_000]),
+    );
+    env.send(&[ix], &[&alice.keypair, &maker.keypair])
+        .expect("first purchase");
+    let ix = env.purchase_ix(&market, false, &alice, 0, 997, &deliver([2_100, 5_000]));
+    env.send(&[ix], &[&alice.keypair, &maker.keypair])
+        .expect("additional purchase");
+    let b = env.balances(&market, &[&alice]);
+    assert_eq!(b.supply, 101_000);
+    assert_eq!(b.reserves, vec![202_100, 505_000]);
+    assert_eq!(b.traders[0].dtf, 98_700 + 997);
+    assert_eq!(b.traders[0].usdc, ALICE_USDC, "max_usdc_in of zero held");
+
+    // Fee 30; 9,970 of 101,000 of each reserve.
+    let ix = env.redeem_in_kind_ix(&market, &alice, 10_000);
+    env.send(&[ix], &[&alice.keypair]).expect("redeem in kind");
+    let after = env.balances(&market, &[&alice]);
+    assert_eq!(after.traders[0].assets, vec![19_949, 49_850]);
+    assert_eq!(after.treasury_dtf - b.treasury_dtf, 30);
+    assert_eq!(after.supply, 101_000 - 9_970);
+}
+
+/// A Token-2022 custody account may carry `ImmutableOwner` and nothing else.
+#[test]
+fn a_token_2022_vault_with_any_other_extension_is_refused() {
+    let token_2022 = |m: &mut MarketSpec| {
+        m.asset_kind = TokenProgramKind::Token2022;
+        m.immutable_owner_vaults = true;
+        m.swap_program = token_2022_program_id();
+    };
+    for (label, change) in [
+        // Another extension type in place of ImmutableOwner.
+        (
+            "other-extension",
+            Box::new(|a: &mut Account| a.data[166] = 9) as Box<dyn Fn(&mut Account)>,
+        ),
+        // A second extension after it.
+        (
+            "second-extension",
+            Box::new(|a: &mut Account| a.data.resize(178, 0)),
+        ),
+    ] {
+        let mut env = Env::new();
+        let mut spec = MarketSpec::two_assets(label);
+        token_2022(&mut spec);
+        let market = env.prepare_market(&spec);
+        tamper(&mut env, &market.vaults[0], |a| change(a));
+        let governance = env.governance.insecure_clone();
+        let ix = env.create_market_ix(&market, &address_of(&governance));
+        assert_fails_with(
+            env.send(&[ix], &[&governance]),
+            AxisCoreError::UnsupportedTokenExtension,
+        );
+    }
+}
+
+/// Tokens sent straight to a reserve after launch issue no DTF. They raise
+/// what every existing DTF redeems for, the locked minimum included.
+#[test]
+fn a_direct_transfer_after_launch_is_a_gift_to_every_holder() {
+    let (mut env, market, alice, maker) = funded_market();
+    env.transfer_tokens(
+        TokenProgramKind::LegacySplToken,
+        &maker.assets[0],
+        &market.vaults[0],
+        &maker.keypair,
+        100_000,
+    )
+    .expect("direct transfer");
+    let b = env.balances(&market, &[&alice]);
+    assert_eq!(b.supply, 100_000, "no DTF issued");
+    assert_eq!(b.reserves, vec![300_000, 500_000]);
+
+    // A later buyer follows the new composition: 3 A and 5 B per DTF.
+    let bob = buyer(&mut env, "bob", &market, BOB_USDC);
+    purchase(
+        &mut env,
+        &market,
+        false,
+        &bob,
+        &maker,
+        BOB_SPEND,
+        &[3_000, 5_000],
+        BOB_SPEND,
+        997,
+    )
+    .expect("purchase at the new ratio");
+    assert_eq!(env.balance(&bob.dtf), 997);
+
+    // Alice's 9,970 burned DTF now release 9,970 / 101,000 of 303,000 A.
+    let ix = env.redeem_in_kind_ix(&market, &alice, 10_000);
+    env.send(&[ix], &[&alice.keypair]).expect("redeem in kind");
+    assert_eq!(
+        env.balances(&market, &[&alice]).traders[0].assets,
+        vec![29_910, 49_850]
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Pause, resume and roles
 // ---------------------------------------------------------------------------
 

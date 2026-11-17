@@ -29,6 +29,8 @@ artifact through its real entry point.
 | USDC redemption, partial and full | Done | `redeem.rs` | `a_partial_usdc_redemption_pays_the_fee_in_dtf_and_delivers_net_usdc`, `a_full_usdc_redemption_exits_the_whole_position` | Jupiter evidence (D2) |
 | Signed min net USDC | Done | `redeem.rs` | `a_usdc_redemption_below_the_signed_minimum_net_usdc_fails_atomically` | None in Core |
 | In-kind redemption, partial and full | Done | `redeem.rs` | `a_partial_in_kind_redemption_transfers_the_proportional_quantities`, `full_in_kind_exits_leave_the_locked_minimum_backed` | D3 (a frozen constituent blocks it) |
+| Token-2022 constituents, `ImmutableOwner` vaults | Done | `token.rs`, `redeem.rs` | `token_2022_constituents_are_purchased_and_redeemed_in_kind`, `a_token_2022_vault_with_any_other_extension_is_refused` | Extension policy (D3) |
+| Direct transfers to a reserve, before and after launch | Done | `purchase.rs` measures only the route's delta | `a_direct_transfer_before_launch_does_not_change_the_first_issuance`, `a_direct_transfer_after_launch_is_a_gift_to_every_holder` | None in Core |
 | 30 bps fee in DTF to the treasury, all three paths | Done | `purchase.rs`, `redeem.rs`, `math.rs` | Treasury balance asserted in each purchase and redemption test above | Fee rounding (D4) |
 | Atomic rollback on a failed bound or leg | Done | whole instruction | The `..._fails_atomically` tests, `a_failed_route_leg_reverts_the_legs_before_it`, `a_failed_redemption_swap_reverts_the_burn_the_fee_and_the_releases` | Rollback on a real route (D2) |
 | Per-DTF pause of purchases and of USDC redemption | Done | `admin.rs` | `purchases_and_usdc_redemption_pause_independently_and_in_kind_stays_open`, `a_pause_applies_to_one_dtf_only` | None in Core |
@@ -67,7 +69,7 @@ Run on the final tree, macOS, rustc 1.93.1 host, platform-tools v1.57.
 | `cargo check --workspace --all-targets` | Pass, no warnings |
 | `cargo test --workspace` | Pass: 13 math, 12 state, 4 LiteSVM smoke, 8 Token-2022 spike |
 | `./scripts/build-sbf.sh` | Pass: `target/deploy/axis_core.so`, 62,888 bytes |
-| `cargo test -p axis-core-test-utils --features sbf-integration --test program_invocation` | Pass: 45 of 45 |
+| `cargo test -p axis-core-test-utils --features sbf-integration --test program_invocation` | Pass: 48 of 48 |
 | `cargo build -p axis-core --features bpf-entrypoint` (CI job) | Pass |
 
 Not run: `cargo clippy`, which is not installed for the pinned toolchain and

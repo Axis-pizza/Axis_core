@@ -1,7 +1,7 @@
 use pinocchio::cpi::Seed;
 use pinocchio::{AccountView, Address, ProgramResult};
 
-use crate::constants::PROTOCOL_CONFIG_SEED;
+use crate::constants::{PROTOCOL_CONFIG_SEED, SYSTEM_PROGRAM_ID};
 use crate::error::AxisCoreError;
 use crate::instructions::common::{
     create_pda_account, expect_canonical_pda, expect_signer, expect_upgrade_authority,
@@ -9,16 +9,18 @@ use crate::instructions::common::{
 };
 use crate::state::ProtocolConfig;
 
-/// Accounts: [protocol_authority (signer, writable, pays rent),
+/// Accounts: [upgrade_authority (signer, writable, pays rent),
 ///            protocol_config (writable, not yet created),
 ///            system_program,
 ///            program_data (Axis Core's ProgramData account)]
-/// Data: usdc_mint(32) | protocol_treasury(32)
+/// Data: protocol_authority(32) | usdc_mint(32) | protocol_treasury(32) |
+///       emergency_operator(32)
 ///
 /// Creates the singleton at `["protocol_config"]` with the canonical bump, so
 /// at most one can ever exist. Only the program's upgrade authority may call
 /// it; otherwise whoever lands the first transaction after deployment would
-/// own the protocol.
+/// own the protocol. The governance authority is named in the data, so the
+/// deployer can hand governance to the Squads vault in the same step.
 pub fn process_initialize_protocol_config(
     program_id: &Address,
     accounts: &mut [AccountView],
@@ -32,11 +34,16 @@ pub fn process_initialize_protocol_config(
     let bump = expect_canonical_pda(config, &[PROTOCOL_CONFIG_SEED], program_id)?;
 
     let state = ProtocolConfig {
-        protocol_authority: authority.address().clone(),
-        usdc_mint: read_address_arg(data, 0)?,
-        protocol_treasury: read_address_arg(data, 32)?,
+        protocol_authority: read_address_arg(data, 0)?,
+        usdc_mint: read_address_arg(data, 32)?,
+        protocol_treasury: read_address_arg(data, 64)?,
+        emergency_operator: read_address_arg(data, 96)?,
         bump,
     };
+    // Nobody can sign for the zero address, so governance would be lost.
+    if state.protocol_authority == SYSTEM_PROGRAM_ID {
+        return Err(AxisCoreError::InvalidAuthority.into());
+    }
 
     let bump_seed = [bump];
     create_pda_account(

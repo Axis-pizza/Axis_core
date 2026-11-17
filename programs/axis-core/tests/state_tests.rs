@@ -2,20 +2,20 @@
 //! layout bug here silently mis-reads a reserve vault address rather than
 //! failing loudly, which is why the round trip is tested field by field.
 
-use axis_core::constants::{MAX_ASSETS, MIN_WEIGHT_BPS};
+use axis_core::constants::MAX_ASSETS;
 use axis_core::error::AxisCoreError;
-use axis_core::state::{DTFMarket, MarketAsset, MarketStatus, ProtocolConfig, TokenProgramKind};
+use axis_core::state::{DTFMarket, MarketAsset, ProtocolConfig, TokenProgramKind};
 use pinocchio::Address;
 
 fn addr(b: u8) -> Address {
     Address::new_from_array([b; 32])
 }
 
-fn asset(mint: u8, vault: u8, weight: u16, tp: TokenProgramKind) -> MarketAsset {
+fn asset(mint: u8, vault: u8, reference_amount: u64, tp: TokenProgramKind) -> MarketAsset {
     MarketAsset {
         asset_mint: addr(mint),
         reserve_vault: addr(vault),
-        weight_bps: weight,
+        reference_amount,
         token_program: tp,
     }
 }
@@ -27,12 +27,18 @@ fn market(assets: Vec<MarketAsset>) -> DTFMarket {
         *slot = Some(a);
     }
     DTFMarket {
-        creator: addr(1),
         dtf_mint: addr(2),
         treasury: addr(3),
+        usdc_mint: addr(4),
+        swap_program: addr(5),
+        liquidity_lock: addr(6),
+        reference_supply: 1_000_000,
+        min_liquidity: 1_000,
         asset_count: count,
-        status: MarketStatus::Active,
         bump: 254,
+        dtf_token_program: TokenProgramKind::Token2022,
+        purchase_paused: false,
+        usdc_redemption_paused: true,
         assets: slots,
     }
 }
@@ -41,10 +47,10 @@ fn market(assets: Vec<MarketAsset>) -> DTFMarket {
 /// offsets from, so they are pinned here rather than trusted.
 #[test]
 fn account_sizes_match_the_documented_layouts() {
-    assert_eq!(MarketAsset::LEN, 67);
-    assert_eq!(DTFMarket::LEN, 308);
-    assert_eq!(DTFMarket::LEN, 107 + MAX_ASSETS * MarketAsset::LEN);
-    assert_eq!(ProtocolConfig::LEN, 105);
+    assert_eq!(MarketAsset::LEN, 73);
+    assert_eq!(DTFMarket::LEN, 408);
+    assert_eq!(DTFMarket::LEN, 189 + MAX_ASSETS * MarketAsset::LEN);
+    assert_eq!(ProtocolConfig::LEN, 137);
 }
 
 #[test]
@@ -63,7 +69,7 @@ fn market_survives_a_pack_unpack_round_trip_field_by_field() {
     for (got, want) in decoded.assets().zip(original.assets()) {
         assert_eq!(got.asset_mint, want.asset_mint);
         assert_eq!(got.reserve_vault, want.reserve_vault);
-        assert_eq!(got.weight_bps, want.weight_bps);
+        assert_eq!(got.reference_amount, want.reference_amount);
         assert_eq!(got.token_program, want.token_program);
     }
 }
@@ -82,25 +88,40 @@ fn a_short_buffer_is_rejected_rather_than_read_past_the_end() {
     );
 }
 
-/// Regression: the 308-byte layout first shipped under `dtfmkt03`, the tag of
-/// the previous 328-byte layout. `unpack` only checks for a minimum length, so
-/// a 328-byte account would have decoded with every field after `status`
-/// shifted.
+/// `unpack` only checks for a minimum length, so every layout change takes a
+/// new discriminator. An account in an earlier layout must not decode with
+/// its fields shifted.
 #[test]
-fn the_previous_328_byte_layout_is_rejected_by_its_discriminator() {
+fn earlier_layouts_are_rejected_by_their_discriminator() {
     let m = market(vec![
         asset(10, 20, 5_000, TokenProgramKind::LegacySplToken),
         asset(11, 21, 5_000, TokenProgramKind::LegacySplToken),
     ]);
     let mut current = vec![0u8; DTFMarket::LEN];
     m.pack(&mut current).unwrap();
-    assert_eq!(&current[0..8], b"dtfmkt04");
+    assert_eq!(&current[0..8], b"dtfmkt05");
 
-    let mut previous = vec![0u8; 328];
-    m.pack(&mut previous).unwrap();
-    previous[0..8].copy_from_slice(b"dtfmkt03");
+    for tag in [b"dtfmkt03", b"dtfmkt04"] {
+        let mut previous = current.clone();
+        previous[0..8].copy_from_slice(tag);
+        assert_eq!(
+            DTFMarket::unpack(&previous),
+            Err(AxisCoreError::InvalidDiscriminator)
+        );
+    }
+
+    let config = ProtocolConfig {
+        protocol_authority: addr(1),
+        usdc_mint: addr(2),
+        protocol_treasury: addr(3),
+        emergency_operator: addr(4),
+        bump: 255,
+    };
+    let mut buf = vec![0u8; ProtocolConfig::LEN];
+    config.pack(&mut buf).unwrap();
+    buf[0..8].copy_from_slice(b"axiscfg2");
     assert_eq!(
-        DTFMarket::unpack(&previous),
+        ProtocolConfig::unpack(&buf),
         Err(AxisCoreError::InvalidDiscriminator)
     );
 }
@@ -169,30 +190,46 @@ fn a_repeated_mint_or_vault_is_rejected() {
     );
 }
 
+/// The reference basket is the approved initial allocation. A zero anywhere
+/// in it would divide by zero or issue nothing at the first purchase, and a
+/// zero locked minimum would bring back the first-depositor rounding attack.
 #[test]
-fn weights_must_sum_to_exactly_ten_thousand_and_clear_the_floor() {
-    let under = market(vec![
-        asset(10, 20, 4_999, TokenProgramKind::LegacySplToken),
-        asset(11, 21, 5_000, TokenProgramKind::LegacySplToken),
-    ]);
-    assert_eq!(
-        under.validate_composition(),
-        Err(AxisCoreError::InvalidWeightSum)
-    );
+fn the_reference_basket_and_the_locked_minimum_must_be_positive() {
+    let two = || {
+        market(vec![
+            asset(10, 20, 2_000, TokenProgramKind::LegacySplToken),
+            asset(11, 21, 5_000, TokenProgramKind::LegacySplToken),
+        ])
+    };
+    assert!(two().validate_composition().is_ok());
 
-    let dust = market(vec![
-        asset(10, 20, MIN_WEIGHT_BPS - 1, TokenProgramKind::LegacySplToken),
-        asset(
-            11,
-            21,
-            10_000 - MIN_WEIGHT_BPS + 1,
-            TokenProgramKind::LegacySplToken,
-        ),
+    let mut no_supply = two();
+    no_supply.reference_supply = 0;
+    let mut no_lock = two();
+    no_lock.min_liquidity = 0;
+    let no_amount = market(vec![
+        asset(10, 20, 2_000, TokenProgramKind::LegacySplToken),
+        asset(11, 21, 0, TokenProgramKind::LegacySplToken),
     ]);
-    assert_eq!(
-        dust.validate_composition(),
-        Err(AxisCoreError::WeightBelowMinimum)
-    );
+    for bad in [no_supply, no_lock, no_amount] {
+        assert_eq!(
+            bad.validate_composition(),
+            Err(AxisCoreError::InvalidReferenceBasket)
+        );
+    }
+}
+
+/// The DTF cannot back itself, and USDC is the purchase currency whose
+/// balance change the signed bounds are measured on.
+#[test]
+fn the_dtf_mint_and_the_usdc_mint_cannot_be_constituents() {
+    for forbidden in [2, 4] {
+        let m = market(vec![
+            asset(10, 20, 2_000, TokenProgramKind::LegacySplToken),
+            asset(forbidden, 21, 5_000, TokenProgramKind::LegacySplToken),
+        ]);
+        assert_eq!(m.validate_composition(), Err(AxisCoreError::ForbiddenAsset));
+    }
 }
 
 #[test]
@@ -203,7 +240,7 @@ fn an_asset_count_beyond_the_cap_is_refused_at_decode_time() {
     ]);
     let mut buf = vec![0u8; DTFMarket::LEN];
     m.pack(&mut buf).unwrap();
-    buf[104] = (MAX_ASSETS + 1) as u8;
+    buf[184] = (MAX_ASSETS + 1) as u8;
     assert_eq!(DTFMarket::unpack(&buf), Err(AxisCoreError::TooManyAssets));
 }
 
@@ -213,6 +250,7 @@ fn protocol_config_round_trips() {
         protocol_authority: addr(1),
         usdc_mint: addr(2),
         protocol_treasury: addr(3),
+        emergency_operator: addr(4),
         bump: 255,
     };
     let mut buf = vec![0u8; ProtocolConfig::LEN];
@@ -227,19 +265,21 @@ fn protocol_config_round_trips() {
 }
 
 #[test]
-fn every_status_byte_decodes_and_an_unknown_one_does_not() {
-    for (byte, want) in [
-        (0u8, MarketStatus::Created),
-        (1, MarketStatus::Active),
-        (2, MarketStatus::Paused),
-        (3, MarketStatus::Deprecated),
-    ] {
-        assert_eq!(MarketStatus::try_from(byte).unwrap(), want);
+fn unknown_flag_and_token_program_bytes_do_not_decode() {
+    let m = market(vec![
+        asset(10, 20, 5_000, TokenProgramKind::LegacySplToken),
+        asset(11, 21, 5_000, TokenProgramKind::LegacySplToken),
+    ]);
+    let mut buf = vec![0u8; DTFMarket::LEN];
+    m.pack(&mut buf).unwrap();
+    for offset in [186, 187, 188] {
+        let mut bad = buf.clone();
+        bad[offset] = 2;
+        assert_eq!(
+            DTFMarket::unpack(&bad),
+            Err(AxisCoreError::InvalidAccountData)
+        );
     }
-    assert_eq!(
-        MarketStatus::try_from(4),
-        Err(AxisCoreError::InvalidAccountData)
-    );
     assert_eq!(
         TokenProgramKind::try_from(2),
         Err(AxisCoreError::InvalidAccountData)

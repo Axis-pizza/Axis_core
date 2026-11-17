@@ -3,8 +3,10 @@ use pinocchio::instruction::{InstructionAccount, InstructionView};
 use pinocchio::sysvars::{rent::Rent, Sysvar};
 use pinocchio::{AccountView, Address, ProgramResult};
 
+use crate::constants::PROTOCOL_CONFIG_SEED;
 use crate::constants::{BPF_LOADER_UPGRADEABLE_ID, SYSTEM_PROGRAM_ID};
 use crate::error::AxisCoreError;
+use crate::state::{DTFMarket, ProtocolConfig};
 
 pub fn expect_signer(account: &AccountView) -> Result<(), AxisCoreError> {
     if !account.is_signer() {
@@ -204,13 +206,13 @@ pub fn verify_pda(
     Ok(())
 }
 
-pub fn read_u16_arg(data: &[u8], offset: usize) -> Result<u16, AxisCoreError> {
-    let bytes: [u8; 2] = data
-        .get(offset..offset + 2)
+pub fn read_u64_arg(data: &[u8], offset: usize) -> Result<u64, AxisCoreError> {
+    let bytes: [u8; 8] = data
+        .get(offset..offset + 8)
         .ok_or(AxisCoreError::InvalidInstruction)?
         .try_into()
         .map_err(|_| AxisCoreError::InvalidInstruction)?;
-    Ok(u16::from_le_bytes(bytes))
+    Ok(u64::from_le_bytes(bytes))
 }
 
 pub fn read_address_arg(data: &[u8], offset: usize) -> Result<Address, AxisCoreError> {
@@ -220,4 +222,38 @@ pub fn read_address_arg(data: &[u8], offset: usize) -> Result<Address, AxisCoreE
         .try_into()
         .map_err(|_| AxisCoreError::InvalidInstruction)?;
     Ok(Address::from(bytes))
+}
+
+/// Loads the protocol singleton. Only the canonical address carries protocol
+/// terms; its stored bump is the canonical one, since
+/// InitializeProtocolConfig derives it.
+pub fn load_config(
+    config: &AccountView,
+    program_id: &Address,
+) -> Result<ProtocolConfig, AxisCoreError> {
+    expect_owned_by_program(config, program_id)?;
+    let state = {
+        let buf = config
+            .try_borrow()
+            .map_err(|_| AxisCoreError::InvalidAccountData)?;
+        ProtocolConfig::unpack(&buf)?
+    };
+    verify_pda(
+        config.address(),
+        &[PROTOCOL_CONFIG_SEED, &[state.bump]],
+        program_id,
+    )?;
+    Ok(state)
+}
+
+/// Loads a market. An account owned by Axis Core with the market
+/// discriminator can only have been written by `CreateMarket`, which places
+/// it at the canonical PDA of its DTF mint, so ownership plus discriminator
+/// identify it without deriving the address again.
+pub fn load_market(market: &AccountView, program_id: &Address) -> Result<DTFMarket, AxisCoreError> {
+    expect_owned_by_program(market, program_id)?;
+    let buf = market
+        .try_borrow()
+        .map_err(|_| AxisCoreError::InvalidAccountData)?;
+    DTFMarket::unpack(&buf)
 }

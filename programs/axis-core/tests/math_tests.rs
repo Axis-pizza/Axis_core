@@ -1,9 +1,14 @@
 //! Value arithmetic. These are the invariants that decide whether a holder's
 //! backing can be diluted, so they are tested by sweep rather than by example.
 
-use axis_core::constants::MINIMUM_LIQUIDITY;
 use axis_core::error::AxisCoreError;
-use axis_core::math::{fee, pro_rata_release, redeemable_supply, required_delivery};
+use axis_core::math::{
+    fee, gross_issuance, issuance_for_delivery, pro_rata_release, redeemable_supply,
+    required_delivery,
+};
+
+/// Fixture value only. The locked minimum is approved per market.
+const MINIMUM_LIQUIDITY: u64 = 1_000;
 
 #[test]
 fn required_delivery_rounds_up_and_release_rounds_down() {
@@ -125,10 +130,16 @@ fn fee_never_exceeds_its_base() {
 
 #[test]
 fn minimum_liquidity_is_never_redeemable() {
-    assert_eq!(redeemable_supply(MINIMUM_LIQUIDITY).unwrap(), 0);
-    assert_eq!(redeemable_supply(MINIMUM_LIQUIDITY + 5).unwrap(), 5);
     assert_eq!(
-        redeemable_supply(MINIMUM_LIQUIDITY - 1),
+        redeemable_supply(MINIMUM_LIQUIDITY, MINIMUM_LIQUIDITY).unwrap(),
+        0
+    );
+    assert_eq!(
+        redeemable_supply(MINIMUM_LIQUIDITY + 5, MINIMUM_LIQUIDITY).unwrap(),
+        5
+    );
+    assert_eq!(
+        redeemable_supply(MINIMUM_LIQUIDITY - 1, MINIMUM_LIQUIDITY),
         Err(AxisCoreError::SupplyBelowMinimumLiquidity)
     );
 }
@@ -139,7 +150,7 @@ fn minimum_liquidity_is_never_redeemable() {
 fn the_locked_minimum_keeps_the_ratio_defined_after_every_holder_leaves() {
     let supply = MINIMUM_LIQUIDITY + 500_000;
     let reserve = 1_000_000u64;
-    let everyone = redeemable_supply(supply).unwrap();
+    let everyone = redeemable_supply(supply, MINIMUM_LIQUIDITY).unwrap();
 
     let released = pro_rata_release(reserve, everyone, supply).unwrap();
     let reserve_left = reserve - released;
@@ -151,4 +162,70 @@ fn the_locked_minimum_keeps_the_ratio_defined_after_every_holder_leaves() {
         "the locked supply must keep backing behind it"
     );
     assert!(required_delivery(reserve_left, 1, supply_left).is_ok());
+}
+
+/// The acceptance fixture for an additional purchase, in integer base units.
+#[test]
+fn the_limiting_constituent_sets_gross_issuance() {
+    let supply = 100_000;
+    let reserves = [200_000, 500_000];
+    let deltas = [2_100, 5_000];
+
+    assert_eq!(
+        issuance_for_delivery(2_100, 200_000, supply).unwrap(),
+        1_050
+    );
+    assert_eq!(
+        issuance_for_delivery(5_000, 500_000, supply).unwrap(),
+        1_000
+    );
+
+    let gross = gross_issuance(&deltas, &reserves, supply).unwrap();
+    assert_eq!(gross, 1_000, "limited by B");
+    assert_eq!(fee(gross), 3);
+    assert_eq!(gross - fee(gross), 997);
+}
+
+#[test]
+fn issuance_rounds_down_and_never_exceeds_any_legs_backing() {
+    // 7 * 1000 / 3000 = 2.33...
+    assert_eq!(issuance_for_delivery(7, 3_000, 1_000).unwrap(), 2);
+    for supply in [1u64, 999, 1_000_000, 123_456_789] {
+        for reserves in [[1u64, 1], [3, 1_000_003], [5_000_000, 77]] {
+            for deltas in [[0u64, 9], [1, 1], [12_345, 6], [1_000_000, 1_000_000]] {
+                let gross = gross_issuance(&deltas, &reserves, supply).unwrap();
+                for i in 0..2 {
+                    // What `gross` DTF claims of leg i afterwards never
+                    // exceeds what the purchase delivered to it.
+                    let claim =
+                        pro_rata_release(reserves[i] + deltas[i], gross, supply + gross).unwrap();
+                    assert!(claim <= deltas[i], "over-issued at {supply} {reserves:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn issuance_needs_a_supply_a_reserve_and_matching_legs() {
+    assert_eq!(
+        issuance_for_delivery(1, 1, 0),
+        Err(AxisCoreError::MarketNotSeeded)
+    );
+    assert_eq!(
+        issuance_for_delivery(1, 0, 1),
+        Err(AxisCoreError::EmptyReserve)
+    );
+    assert_eq!(
+        gross_issuance(&[1, 1], &[1], 1),
+        Err(AxisCoreError::UnknownAsset)
+    );
+    assert_eq!(
+        gross_issuance(&[], &[], 1),
+        Err(AxisCoreError::UnknownAsset)
+    );
+    assert_eq!(
+        issuance_for_delivery(u64::MAX, 1, u64::MAX),
+        Err(AxisCoreError::MathOverflow)
+    );
 }

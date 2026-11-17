@@ -6,6 +6,7 @@
 //! protocol tests. It intentionally does not implement protocol business logic.
 
 pub mod accounts;
+pub mod fixture;
 pub mod litesvm;
 pub mod tokens;
 

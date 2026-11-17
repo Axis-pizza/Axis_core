@@ -1,33 +1,61 @@
-//! Value arithmetic for mint and redeem.
+//! Value arithmetic for purchase and redemption.
 //!
 //! Both directions are pro-rata against live reserve balances and the live DTF
-//! supply. No price, NAV, or oracle enters any function here (`01` §30 V13).
-//!
-//! The two directions round opposite ways and that asymmetry is the safety
-//! property, not an accident:
+//! supply. No price, NAV, or oracle enters any function here.
 //!
 //! ```txt
-//! mint    required_i = ceil(reserve_i * dtf_out / supply)     rounds against the minter
-//! redeem  release_i  = floor(reserve_i * dtf_in / supply)     rounds against the redeemer
+//! purchase  gross   = min_i floor(delta_i * supply / reserve_i)   rounds against the buyer
+//! redeem    release = floor(reserve_i * dtf_burned / supply)      rounds against the redeemer
 //! ```
 //!
-//! Every remainder in either direction stays in the reserve and accrues to the
-//! holders who did not move. `round_trip_never_profits` in the tests pins the
-//! consequence: minting X and immediately redeeming X returns strictly less
-//! than was delivered whenever any rounding occurred at all.
+//! Every remainder in either direction stays in the reserve and accrues to
+//! all holders. `round_trip_never_profits` in the tests pins the consequence.
 
 use crate::error::AxisCoreError;
 
 type Result<T> = core::result::Result<T, AxisCoreError>;
 
-/// Reserve delivery a mint of `dtf_out` must produce for asset `i`.
+/// DTF that one constituent's actual reserve increase `delta` supports, given
+/// the reserve and supply from before the purchase. Rounds down, so a buyer
+/// never acquires a claim larger than the reserves they funded.
+pub fn issuance_for_delivery(delta: u64, reserve_before: u64, supply_before: u64) -> Result<u64> {
+    if supply_before == 0 {
+        return Err(AxisCoreError::MarketNotSeeded);
+    }
+    if reserve_before == 0 {
+        return Err(AxisCoreError::EmptyReserve);
+    }
+    let issued = (delta as u128)
+        .checked_mul(supply_before as u128)
+        .ok_or(AxisCoreError::MathOverflow)?
+        / (reserve_before as u128);
+    u64::try_from(issued).map_err(|_| AxisCoreError::MathOverflow)
+}
+
+/// Gross DTF a purchase may issue: the smallest per-constituent result, so
+/// the constituent with the least delivery sets it and DTF is never issued
+/// beyond its backing. The surplus on every other leg stays in the reserves.
 ///
-/// Rounds up, so a minter can never acquire a claim larger than the reserves
-/// they actually funded.
+/// For the first purchase, `reserves_before` and `supply_before` are the
+/// governance-approved reference basket instead of live balances.
+pub fn gross_issuance(deltas: &[u64], reserves_before: &[u64], supply_before: u64) -> Result<u64> {
+    if deltas.is_empty() || deltas.len() != reserves_before.len() {
+        return Err(AxisCoreError::UnknownAsset);
+    }
+    let mut gross = u64::MAX;
+    for (delta, reserve) in deltas.iter().zip(reserves_before) {
+        let issued = issuance_for_delivery(*delta, *reserve, supply_before)?;
+        if issued < gross {
+            gross = issued;
+        }
+    }
+    Ok(gross)
+}
+
+/// Reserve delivery that issuing `dtf_out` gross requires for asset `i`.
+/// Rounds up. Not used on-chain: clients size route legs with it.
 pub fn required_delivery(reserve_balance: u64, dtf_out: u64, total_supply: u64) -> Result<u64> {
     if total_supply == 0 {
-        // Proportional delivery is undefined with nothing to be proportional
-        // to. SeedMarket carries the first issuance instead.
         return Err(AxisCoreError::MarketNotSeeded);
     }
     let numerator = (reserve_balance as u128)
@@ -43,7 +71,7 @@ pub fn required_delivery(reserve_balance: u64, dtf_out: u64, total_supply: u64) 
     u64::try_from(rounded).map_err(|_| AxisCoreError::MathOverflow)
 }
 
-/// Reserve amount a redemption of `dtf_in` releases for asset `i`.
+/// Reserve amount a redemption that burns `dtf_in` releases for asset `i`.
 ///
 /// Rounds down, so a redeemer can never withdraw more than their exact share.
 pub fn pro_rata_release(reserve_balance: u64, dtf_in: u64, total_supply: u64) -> Result<u64> {
@@ -57,8 +85,9 @@ pub fn pro_rata_release(reserve_balance: u64, dtf_in: u64, total_supply: u64) ->
     u64::try_from(released).map_err(|_| AxisCoreError::MathOverflow)
 }
 
-/// The fee on a DTF `amount`, at the fixed `FEE_BPS`, rounded down: the gross
-/// DTF a mint earns, or the DTF a redeem hands in.
+/// The fee on a DTF `amount`, at the fixed `FEE_BPS`, rounded down: taken
+/// from the gross DTF a purchase issues, or from the DTF a redemption hands
+/// in.
 ///
 /// `FEE_BPS` is below the denominator, so the fee never exceeds `amount` and
 /// the result always fits.
@@ -70,10 +99,10 @@ const BPS: u64 = crate::constants::BPS_DENOMINATOR;
 const FEE_BPS: u64 = crate::constants::FEE_BPS;
 const _: () = assert!(FEE_BPS < BPS);
 
-/// Supply that may still be redeemed, excluding the permanently locked
-/// MINIMUM_LIQUIDITY.
-pub fn redeemable_supply(total_supply: u64) -> Result<u64> {
+/// Supply that holders can ever redeem: everything except the minimum
+/// liquidity locked at the first purchase.
+pub fn redeemable_supply(total_supply: u64, min_liquidity: u64) -> Result<u64> {
     total_supply
-        .checked_sub(crate::constants::MINIMUM_LIQUIDITY)
+        .checked_sub(min_liquidity)
         .ok_or(AxisCoreError::SupplyBelowMinimumLiquidity)
 }

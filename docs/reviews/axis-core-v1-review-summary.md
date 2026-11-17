@@ -25,7 +25,7 @@ artifact through its real entry point.
 | Competing first purchases | Done | `purchase.rs` | `the_loser_of_a_first_purchase_race_buys_as_an_ordinary_purchaser` | D1 |
 | Additional purchase | Done | `purchase.rs`, `math.rs` | `an_additional_purchase_issues_against_actual_reserve_increases` | Jupiter evidence (D2) |
 | Signed max USDC and min net DTF | Done | `purchase.rs` | `a_purchase_below_the_signed_minimum_net_output_fails_atomically`, `a_purchase_above_the_signed_maximum_usdc_fails_atomically` | None in Core |
-| Surplus stays in reserves, unspent USDC stays with the buyer | Done | `purchase.rs` | the two tests above the line, and `the_first_purchaser_cannot_change...` | Surplus limit, if wanted (defaults table) |
+| Surplus stays in reserves, unspent USDC stays with the buyer | Done | `purchase.rs` | `an_additional_purchase_issues_against_actual_reserve_increases`, `the_first_purchaser_cannot_change_the_allocation_or_the_issuance` | Surplus limit, if wanted (defaults table) |
 | USDC redemption, partial and full | Done | `redeem.rs` | `a_partial_usdc_redemption_pays_the_fee_in_dtf_and_delivers_net_usdc`, `a_full_usdc_redemption_exits_the_whole_position` | Jupiter evidence (D2) |
 | Signed min net USDC | Done | `redeem.rs` | `a_usdc_redemption_below_the_signed_minimum_net_usdc_fails_atomically` | None in Core |
 | In-kind redemption, partial and full | Done | `redeem.rs` | `a_partial_in_kind_redemption_transfers_the_proportional_quantities`, `full_in_kind_exits_leave_the_locked_minimum_backed` | D3 (a frozen constituent blocks it) |

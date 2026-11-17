@@ -7,14 +7,20 @@ repository.workspace = true
 rust-version.workspace = true
 
 [lib]
-crate-type = ["lib"]
+crate-type = ["cdylib", "lib"]
 
 [features]
 default = []
 bpf-entrypoint = []
 
 [dependencies]
-pinocchio.workspace = true
+pinocchio = { workspace = true, features = ["cpi"] }
+
+# Host-only. `Address::create_program_address` is a syscall on the Solana
+# target and needs curve25519 to run in host unit tests. Not compiled into
+# the program.
+[target.'cfg(not(target_os = "solana"))'.dependencies]
+solana-address = { version = "=2.2.0", features = ["curve25519"] }
 
 [lints.rust.unexpected_cfgs]
 level = "warn"

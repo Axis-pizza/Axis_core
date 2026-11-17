@@ -172,5 +172,5 @@ fn invalid_artifact(path: &Path, reason: String) -> AxisTestError {
 }
 
 fn artifact_blocker_note() -> &'static str {
-    "Solana SBF build tooling is deferred for this repo; do not treat the program as loaded unless a LiteSVM-loadable .so exists. Set AXIS_CORE_PROGRAM_ARTIFACT to an explicit artifact path once documented SBF tooling is available."
+    "Build it with scripts/build-sbf.sh, which pins platform-tools v1.57 and works around the cargo-build-sbf toolchain-link bug. Set AXIS_CORE_PROGRAM_ARTIFACT to override the path. Do not treat the program as loaded unless a LiteSVM-loadable .so exists."
 }

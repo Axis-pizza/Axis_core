@@ -11,15 +11,18 @@ Current scaffold responsibilities:
 - raw account data and lamport reads
 - SPL Token / Token-2022 base account balance reads
 
-Deferred responsibilities:
+`src/fixture.rs` builds whole markets for the invocation tests: real SPL Token
+and Token-2022 mints and accounts, instruction builders for every Axis Core
+instruction, and balance snapshots for asserting that a failed instruction
+committed nothing. Its amounts are fixtures, not production parameters.
 
-- mock USDC mint setup
-- mock asset mint setup
-- user token account creation helpers
-- reserve vault fixtures
-- protocol account builders
-- mint, redeem, fee, routing, custody, DEX CPI, and Token-2022 business-flow tests
+Purchases and USDC redemptions in those tests swap through a route stand-in:
+the legacy SPL Token program approved as the market's swap program, and a
+maker who co-signs plain token transfers. It exercises Core's real CPI path.
+It is not Jupiter, and says nothing about a production route's account locks,
+transaction size or compute use.
 
-Program loading expects a LiteSVM-loadable Solana SBF shared object. Until SBF
-tooling is documented for this workspace, a missing `target/deploy/axis_core.so`
-is reported as a blocker instead of being treated as a successful load.
+Program loading expects a LiteSVM-loadable Solana SBF shared object. Build it
+with `scripts/build-sbf.sh`, then run the opt-in `program_invocation` target
+with the `sbf-integration` feature. A missing `target/deploy/axis_core.so` is
+reported as a blocker instead of being treated as a successful load.

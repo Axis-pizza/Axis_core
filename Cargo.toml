@@ -4,6 +4,7 @@ members = [
     "crates/axis-core-test-utils",
     "programs/axis-core",
 ]
+exclude = ["experiments/atomic-mint-v1"]
 resolver = "2"
 
 [workspace.package]
